@@ -71,3 +71,4 @@ class TrnData(data.Dataset):
 
     def __getitem__(self, idx):
         return self.rows[idx], self.cols[idx], self.negs[idx]
+    

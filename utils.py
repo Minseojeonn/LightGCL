@@ -52,23 +52,32 @@ def spmm(sp, emb, device):
 
 class TrnData(data.Dataset):
     def __init__(self, coomat):
-        self.rows = coomat.row
-        self.cols = coomat.col
-        self.dokmat = coomat.todok()
-        self.negs = np.zeros(len(self.rows)).astype(np.int32)
+        self.dokmat, self.train_positive_rows, self.train_positive_cols, self.train_negative_rows, self.train_negative_cols, self.train_negative, self.train_positive = self.positive_negative_edge_spliter(coomat)
+        self.negs = np.zeros(len(self.train_positive_rows)).astype(np.int32)
 
-    def neg_sampling(self):
-        for i in range(len(self.rows)):
-            u = self.rows[i]
-            while True:
-                i_neg = np.random.randint(self.dokmat.shape[1])
-                if (u, i_neg) not in self.dokmat:
-                    break
-            self.negs[i] = i_neg
+    def positive_negative_edge_spliter(self, coomat):
+        train_positive = (coomat==1).astype(np.float32).tocoo()
+        train_negative = (coomat==-1).astype(np.float32).tocoo()   
+        return coomat.todok(), train_positive.row, train_positive.col, train_negative.row, train_negative.col, train_negative.tocsr(), train_positive.tocsr()
+        
+    def neg_sampling(self): #negative가 명시적으로 없는 유저는, 랜덤하게 네거티브 엣지 만들어준다.›‹
+        for i in range(len(self.train_positive_rows)):
+            u = self.train_positive_rows[i]
+            i_pos = self.train_positive_cols[i]
+            i_neg = self.train_negative[u]
+            if i_neg.nnz > 0:
+                i_neg_idx = np.random.randint(len(i_neg.indices))
+                self.negs[i] = i_neg.indices[i_neg_idx]
+            else:
+                while True:
+                    negative_idx = np.random.randint(self.train_negative.shape[1])
+                    if i_pos != negative_idx:
+                        self.negs[i] = i_neg_idx 
+                        break
 
     def __len__(self):
-        return len(self.rows)
+        return len(self.train_positive_rows)
 
     def __getitem__(self, idx):
-        return self.rows[idx], self.cols[idx], self.negs[idx]
+        return self.train_positive_rows[idx], self.train_positive_cols[idx], self.negs[idx]
     

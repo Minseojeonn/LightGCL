@@ -64,9 +64,8 @@ for i in file_names:
         for f, t, s in zip(fr,to,sign) :
             #print(f,t,s)
             if key == "training":
-                if s == 1:
-                    train_matrix[f][t] = 1
-                    filtered_edge_num += 1
+                train_matrix[f][t] = s
+                filtered_edge_num += 1
             elif key == "val":
                 val_matrix[f][t] = s
                 filtered_edge_num += 1
@@ -74,7 +73,8 @@ for i in file_names:
                 test_matrix[f][t] = s
                 filtered_edge_num += 1
             original_edge_num += 1
-    if os.path.isdir(f"./{dataset_name}-{dataset_number}" == False):
+    if os.path.isdir(f"./{dataset_name}-{dataset_number}") == False:
+        print(f"./{dataset_name}-{dataset_number}")
         os.makedirs(f"./{dataset_name}-{dataset_number}")
     with open(f"./{dataset_name}-{dataset_number}/trnMat.pkl", 'wb') as f:
         pickle.dump(coo_matrix(train_matrix), f, pickle.HIGHEST_PROTOCOL)

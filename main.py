@@ -9,6 +9,7 @@ from tqdm import tqdm
 import time
 import torch.utils.data as data
 from utils import TrnData
+from copy import deepcopy
 
 device = 'cuda:' + args.cuda
 
@@ -31,28 +32,30 @@ path = 'data/' + args.data + '/'
 f = open(path+'trnMat.pkl','rb')
 train = pickle.load(f)
 train_csr = (train!=0).astype(np.float32)
+original_train = deepcopy(train)
+train = train.tocoo()
+print("Nonzero 개수:", train.nnz, train_csr.nnz)
 f = open(path+'tstMat.pkl','rb')
 test = pickle.load(f)
 print('Data loaded.')
-
 print('user_num:',train.shape[0],'item_num:',train.shape[1],'lambda_1:',lambda_1,'lambda_2:',lambda_2,'temp:',temp,'q:',svd_q)
-
 epoch_user = min(train.shape[0], 30000)
 
 # normalizing the adj matrix
-rowD = np.array(train.sum(1)).squeeze()
-colD = np.array(train.sum(0)).squeeze()
+rowD = np.array(train_csr.sum(1)).squeeze()
+colD = np.array(train_csr.sum(0)).squeeze()
 for i in range(len(train.data)):
     train.data[i] = train.data[i] / pow(rowD[train.row[i]]*colD[train.col[i]], 0.5)
 
 # construct data loader
 train = train.tocoo()
-train_data = TrnData(train)
+train_data = TrnData(original_train)
 train_loader = data.DataLoader(train_data, batch_size=args.inter_batch, shuffle=True, num_workers=0)
 
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
 print('Adj matrix normalized.')
+
 
 # perform svd reconstruction
 adj = scipy_sparse_mat_to_torch_sparse_tensor(train).coalesce().cuda(torch.device(device))

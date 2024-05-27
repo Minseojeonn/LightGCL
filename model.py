@@ -84,8 +84,8 @@ class LightGCL(nn.Module):
             u_emb = self.E_u[uids]
             pos_emb = self.E_i[pos]
             neg_emb = self.E_i[neg]
-            pos_scores = (u_emb * pos_emb).sum(-1)
-            neg_scores = (u_emb * neg_emb).sum(-1)
+            pos_scores = (u_emb * pos_emb).sum(-1) #positive edge
+            neg_scores = (u_emb * neg_emb).sum(-1) #negative edge
             loss_r = -(pos_scores - neg_scores).sigmoid().log().mean()
 
             # reg loss

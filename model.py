@@ -36,17 +36,22 @@ class LightGCL(nn.Module):
         self.v_mul_s = v_mul_s
         self.ut = ut
         self.vt = vt
-
+        self.sigmoid = torch.nn.Sigmoid()
+        self.bceloss = torch.nn.BCELoss()
         self.device = device
 
-    def forward(self, uids, iids, pos, neg, test=False):
+    def forward(self, uids, iids, sign, test=False):
         if test==True:  # testing phase
-            preds = self.E_u[uids] @ self.E_i.T
-            mask = self.train_csr[uids.cpu().numpy()].toarray()
-            mask = torch.Tensor(mask).cuda(torch.device(self.device))
-            preds = preds * (1-mask) - 1e8 * mask
-            predictions = preds.argsort(descending=True)
-            return predictions
+            u_emb = self.E_u[uids]
+            i_emb = self.E_i[iids]
+            logit = (u_emb*i_emb).sum(dim=1) #elemental_wise, sum dim 1
+            pred = self.sigmoid(logit)
+            #mask = self.train_csr[uids.cpu().numpy()].toarray()
+            #mask = torch.Tensor(mask).cuda(torch.device(self.device))
+            #preds = preds * (1-mask) - 1e8 * mask
+            #for ranking task
+            #predictions = preds.argsort(descending=True)
+            return (pred >= 0.5).float()
         else:  # training phase
             for layer in range(1,self.l+1):
                 # GNN propagation
@@ -80,14 +85,25 @@ class LightGCL(nn.Module):
             pos_score = (torch.clamp((G_u_norm[uids] * E_u_norm[uids]).sum(1) / self.temp,-5.0,5.0)).mean() + (torch.clamp((G_i_norm[iids] * E_i_norm[iids]).sum(1) / self.temp,-5.0,5.0)).mean()
             loss_s = -pos_score + neg_score
 
-            # bpr loss
+            ''' 
+            ## bpr loss - Ranking Task
+            
             u_emb = self.E_u[uids]
             pos_emb = self.E_i[pos]
             neg_emb = self.E_i[neg]
             pos_scores = (u_emb * pos_emb).sum(-1) #positive edge
             neg_scores = (u_emb * neg_emb).sum(-1) #negative edge
             loss_r = -(pos_scores - neg_scores).sigmoid().log().mean()
-
+            '''
+            
+            #bce loss - binary classification task
+            u_emb = self.E_u[uids]
+            i_emb = self.E_i[iids]
+            logit = (u_emb*i_emb).sum(dim=1) #elemental_wise, sum dim 1
+            logit = self.sigmoid(logit)
+            loss_r = self.bceloss(logit,sign) 
+            
+                
             # reg loss
             loss_reg = 0
             for param in self.parameters():

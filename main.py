@@ -10,6 +10,9 @@ import time
 import torch.utils.data as data
 from utils import TrnData
 from copy import deepcopy
+import torchmetrics 
+from sklearn.metrics import roc_auc_score
+
 
 device = 'cuda:' + args.cuda
 
@@ -37,6 +40,8 @@ train = train.tocoo()
 print("Nonzero 개수:", train.nnz, train_csr.nnz)
 f = open(path+'tstMat.pkl','rb')
 test = pickle.load(f)
+f = open(path+'valMat.pkl','rb')
+val = pickle.load(f)
 print('Data loaded.')
 print('user_num:',train.shape[0],'item_num:',train.shape[1],'lambda_1:',lambda_1,'lambda_2:',lambda_2,'temp:',temp,'q:',svd_q)
 epoch_user = min(train.shape[0], 30000)
@@ -49,13 +54,19 @@ for i in range(len(train.data)):
 
 # construct data loader
 train = train.tocoo()
-train_data = TrnData(original_train)
-train_loader = data.DataLoader(train_data, batch_size=args.inter_batch, shuffle=True, num_workers=0)
+train_data = TrnData(original_train, device)
+train_loader = data.DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=0)
+test = test.tocoo()
+test_data = TrnData(test, device)
+test_loader = data.DataLoader(test_data, batch_size=len(test_data), shuffle=False, num_workers=0)
+val = val.tocoo()
+val_data = TrnData(val, device)
+val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, num_workers=0)
 
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
 print('Adj matrix normalized.')
-
+auc_metric = torchmetrics.AUROC(pos_label = 1)
 
 # perform svd reconstruction
 adj = scipy_sparse_mat_to_torch_sparse_tensor(train).coalesce().cuda(torch.device(device))
@@ -66,22 +77,13 @@ v_mul_s = svd_v @ (torch.diag(s))
 del s
 print('SVD done.')
 
-# process test set
-test_labels = [[] for i in range(test.shape[0])]
-for i in range(len(test.data)):
-    row = test.row[i]
-    col = test.col[i]
-    test_labels[row].append(col)
-print('Test data processed.')
 
 loss_list = []
 loss_r_list = []
 loss_s_list = []
-recall_20_x = []
-recall_20_y = []
-ndcg_20_y = []
-recall_40_y = []
-ndcg_40_y = []
+best_val_auc, best_test_auc = float("-inf"), float("-inf")
+
+
 
 model = LightGCL(adj_norm.shape[0], adj_norm.shape[1], d, u_mul_s, v_mul_s, svd_u.T, svd_v.T, train_csr, adj_norm, l, temp, lambda_1, lambda_2, dropout, batch_user, device)
 #model.load_state_dict(torch.load('saved_model.pt'))
@@ -92,33 +94,26 @@ optimizer = torch.optim.Adam(model.parameters(),weight_decay=0,lr=lr)
 current_lr = lr
 
 for epoch in range(epoch_no):
-    if (epoch+1)%50 == 0:
-        torch.save(model.state_dict(),'saved_model/saved_model_epoch_'+str(epoch)+'.pt')
-        torch.save(optimizer.state_dict(),'saved_model/saved_optim_epoch_'+str(epoch)+'.pt')
+    # 모델 저장
+    # if (epoch+1)%50 == 0:
+        ##torch.save(model.state_dict(),'saved_model/saved_model_epoch_'+str(epoch)+'.pt')
+        ##torch.save(optimizer.state_dict(),'saved_model/saved_optim_epoch_'+str(epoch)+'.pt')
 
     epoch_loss = 0
     epoch_loss_r = 0
     epoch_loss_s = 0
-    train_loader.dataset.neg_sampling()
-    for i, batch in enumerate(tqdm(train_loader)):
-        uids, pos, neg = batch
-        uids = uids.long().cuda(torch.device(device))
-        pos = pos.long().cuda(torch.device(device))
-        neg = neg.long().cuda(torch.device(device))
-        iids = torch.concat([pos, neg], dim=0)
-
-        # feed
+    for i, batch in enumerate(tqdm(train_loader)): ## batch
+        uids, iids, sign = batch
+        #feed
         optimizer.zero_grad()
-        loss, loss_r, loss_s= model(uids, iids, pos, neg)
+        loss, loss_r, loss_s= model(uids, iids, sign, test=False)
         loss.backward()
         optimizer.step()
-        #print('batch',batch)
         epoch_loss += loss.cpu().item()
         epoch_loss_r += loss_r.cpu().item()
         epoch_loss_s += loss_s.cpu().item()
-
-        torch.cuda.empty_cache()
-        #print(i, len(train_loader), end='\r')
+    torch.cuda.empty_cache()
+        
 
     batch_no = len(train_loader)
     epoch_loss = epoch_loss/batch_no
@@ -129,84 +124,22 @@ for epoch in range(epoch_no):
     loss_s_list.append(epoch_loss_s)
     print('Epoch:',epoch,'Loss:',epoch_loss,'Loss_r:',epoch_loss_r,'Loss_s:',epoch_loss_s)
 
-    if epoch % 3 == 0:  # test every 10 epochs
-        test_uids = np.array([i for i in range(adj_norm.shape[0])])
-        batch_no = int(np.ceil(len(test_uids)/batch_user))
+    if epoch % 3 == 0:  # test every 3 epochs
+        val_auc, test_auc = None, None
+        with torch.no_grad():
+            for i, batch in enumerate(tqdm(test_loader)): ## Full batch
+                uids, iids, sign = batch
+                pred = model(uids, iids, sign, test=True)
+                test_auc = auc_metric(pred, sign.long())
+                print(test_auc, roc_auc_score(pred.to("cpu").detach().numpy(), sign.to("cpu").detach().numpy()))
+            for i, batch in enumerate(tqdm(val_loader)): ## Full batch
+                uids, iids, sign = batch
+                pred = model(uids, iids, sign, test=True)
+                val_auc = auc_metric(pred, sign.long())
+                print(val_auc, roc_auc_score(pred.to("cpu").detach().numpy(), sign.to("cpu").detach().numpy()))
+        best_val_auc = max(best_val_auc, val_auc)
+        best_test_auc = max(best_test_auc, test_auc)
+        torch.cuda.empty_cache()
+        print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
 
-        all_recall_20 = 0
-        all_ndcg_20 = 0
-        all_recall_40 = 0
-        all_ndcg_40 = 0
-        for batch in tqdm(range(batch_no)):
-            start = batch*batch_user
-            end = min((batch+1)*batch_user,len(test_uids))
-
-            test_uids_input = torch.LongTensor(test_uids[start:end]).cuda(torch.device(device))
-            predictions = model(test_uids_input,None,None,None,test=True)
-            predictions = np.array(predictions.cpu())
-
-            #top@20
-            recall_20, ndcg_20 = metrics(test_uids[start:end],predictions,20,test_labels)
-            #top@40
-            recall_40, ndcg_40 = metrics(test_uids[start:end],predictions,40,test_labels)
-
-            all_recall_20+=recall_20
-            all_ndcg_20+=ndcg_20
-            all_recall_40+=recall_40
-            all_ndcg_40+=ndcg_40
-            #print('batch',batch,'recall@20',recall_20,'ndcg@20',ndcg_20,'recall@40',recall_40,'ndcg@40',ndcg_40)
-        print('-------------------------------------------')
-        print('Test of epoch',epoch,':','Recall@20:',all_recall_20/batch_no,'Ndcg@20:',all_ndcg_20/batch_no,'Recall@40:',all_recall_40/batch_no,'Ndcg@40:',all_ndcg_40/batch_no)
-        recall_20_x.append(epoch)
-        recall_20_y.append(all_recall_20/batch_no)
-        ndcg_20_y.append(all_ndcg_20/batch_no)
-        recall_40_y.append(all_recall_40/batch_no)
-        ndcg_40_y.append(all_ndcg_40/batch_no)
-
-# final test
-test_uids = np.array([i for i in range(adj_norm.shape[0])])
-batch_no = int(np.ceil(len(test_uids)/batch_user))
-
-all_recall_20 = 0
-all_ndcg_20 = 0
-all_recall_40 = 0
-all_ndcg_40 = 0
-for batch in range(batch_no):
-    start = batch*batch_user
-    end = min((batch+1)*batch_user,len(test_uids))
-
-    test_uids_input = torch.LongTensor(test_uids[start:end]).cuda(torch.device(device))
-    predictions = model(test_uids_input,None,None,None,test=True)
-    predictions = np.array(predictions.cpu())
-
-    #top@20
-    recall_20, ndcg_20 = metrics(test_uids[start:end],predictions,20,test_labels)
-    #top@40
-    recall_40, ndcg_40 = metrics(test_uids[start:end],predictions,40,test_labels)
-
-    all_recall_20+=recall_20
-    all_ndcg_20+=ndcg_20
-    all_recall_40+=recall_40
-    all_ndcg_40+=ndcg_40
-    #print('batch',batch,'recall@20',recall_20,'ndcg@20',ndcg_20,'recall@40',recall_40,'ndcg@40',ndcg_40)
-print('-------------------------------------------')
-print('Final test:','Recall@20:',all_recall_20/batch_no,'Ndcg@20:',all_ndcg_20/batch_no,'Recall@40:',all_recall_40/batch_no,'Ndcg@40:',all_ndcg_40/batch_no)
-
-recall_20_x.append('Final')
-recall_20_y.append(all_recall_20/batch_no)
-ndcg_20_y.append(all_ndcg_20/batch_no)
-recall_40_y.append(all_recall_40/batch_no)
-ndcg_40_y.append(all_ndcg_40/batch_no)
-
-metric = pd.DataFrame({
-    'epoch':recall_20_x,
-    'recall@20':recall_20_y,
-    'ndcg@20':ndcg_20_y,
-    'recall@40':recall_40_y,
-    'ndcg@40':ndcg_40_y
-})
-current_t = time.gmtime()
-metric.to_csv('log/result_'+args.data+'_'+time.strftime('%Y-%m-%d-%H',current_t)+'.csv')
-
-torch.save(model.state_dict(),'saved_model/saved_model_'+args.data+'_'+time.strftime('%Y-%m-%d-%H',current_t)+'.pt')
-torch.save(optimizer.state_dict(),'saved_model/saved_optim_'+args.data+'_'+time.strftime('%Y-%m-%d-%H',current_t)+'.pt')
+print(f"Result : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")

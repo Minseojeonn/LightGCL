@@ -39,13 +39,16 @@ class LightGCL(nn.Module):
         self.sigmoid = torch.nn.Sigmoid()
         self.bceloss = torch.nn.BCELoss()
         self.device = device
+        self.sign_classifier = nn.Sequential(nn.Linear(d*2, d),
+                                             nn.LeakyReLU(),
+                                             nn.Linear(d, 1))
 
     def forward(self, uids, iids, sign, test=False):
         if test==True:  # testing phase
             u_emb = self.E_u[uids]
             i_emb = self.E_i[iids]
-            logit = (u_emb*i_emb).sum(dim=1) #elemental_wise, sum dim 1
-            pred = self.sigmoid(logit)
+            logit = self.sign_classifier(torch.concat([u_emb,i_emb], dim = -1))
+            pred = self.sigmoid(logit).squeeze()
             #mask = self.train_csr[uids.cpu().numpy()].toarray()
             #mask = torch.Tensor(mask).cuda(torch.device(self.device))
             #preds = preds * (1-mask) - 1e8 * mask
@@ -99,10 +102,9 @@ class LightGCL(nn.Module):
             #bce loss - binary classification task
             u_emb = self.E_u[uids]
             i_emb = self.E_i[iids]
-            logit = (u_emb*i_emb).sum(dim=1) #elemental_wise, sum dim 1
-            logit = self.sigmoid(logit)
-            loss_r = self.bceloss(logit,sign) 
-            
+            logit = self.sign_classifier(torch.concat([u_emb,i_emb], dim = -1))
+            logit = self.sigmoid(logit).squeeze()
+            loss_r = self.bceloss(logit,sign)
                 
             # reg loss
             loss_reg = 0

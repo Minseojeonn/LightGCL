@@ -112,7 +112,6 @@ for epoch in range(epoch_no):
         epoch_loss += loss.cpu().item()
         epoch_loss_r += loss_r.cpu().item()
         epoch_loss_s += loss_s.cpu().item()
-    torch.cuda.empty_cache()
         
 
     batch_no = len(train_loader)
@@ -130,16 +129,19 @@ for epoch in range(epoch_no):
             for i, batch in enumerate(tqdm(test_loader)): ## Full batch
                 uids, iids, sign = batch
                 pred = model(uids, iids, sign, test=True)
-                test_auc = auc_metric(pred, sign.long())
-                print(test_auc, roc_auc_score(pred.to("cpu").detach().numpy(), sign.to("cpu").detach().numpy()))
+                auc_metric.reset()
+                auc_metric.update(pred, sign.long())
+                test_auc = auc_metric.compute()
+                print(test_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy()))
             for i, batch in enumerate(tqdm(val_loader)): ## Full batch
                 uids, iids, sign = batch
                 pred = model(uids, iids, sign, test=True)
-                val_auc = auc_metric(pred, sign.long())
-                print(val_auc, roc_auc_score(pred.to("cpu").detach().numpy(), sign.to("cpu").detach().numpy()))
+                auc_metric.reset()
+                auc_metric.update(pred, sign.long())
+                val_auc = auc_metric.compute()
+                print(val_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy()))
         best_val_auc = max(best_val_auc, val_auc)
         best_test_auc = max(best_test_auc, test_auc)
-        torch.cuda.empty_cache()
         print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
 
 print(f"Result : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")

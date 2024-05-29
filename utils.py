@@ -51,11 +51,11 @@ def spmm(sp, emb, device):
     return result
 
 class TrnData(data.Dataset):
-    def __init__(self, coomat, device):
+    def __init__(self, coomat):
         self.dokmat, self.train_positive_rows, self.train_positive_cols, self.train_negative_rows, self.train_negative_cols, self.train_negative, self.train_positive = self.positive_negative_edge_spliter(coomat)
-        self.train_rows = torch.tensor(coomat.row, device=device, dtype=torch.int64) #long
-        self.train_cols = torch.tensor(coomat.col, device=device, dtype=torch.int64) #long
-        self.dokmat = torch.tensor(self.dokmat.toarray(), device=device, dtype=torch.float32) #float
+        self.train_rows = torch.tensor(coomat.row, device="cpu", dtype=torch.int64) #long
+        self.train_cols = torch.tensor(coomat.col, device="cpu", dtype=torch.int64) #long
+        self.dokmat = torch.tensor(self.dokmat.toarray(), device="cpu", dtype=torch.float32) #float
         #self.negs = np.zeros(len(self.train_positive_rows)).astype(np.int32)
 
     def positive_negative_edge_spliter(self, coomat):

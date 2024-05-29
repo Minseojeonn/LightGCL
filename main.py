@@ -54,15 +54,14 @@ for i in range(len(train.data)):
 
 # construct data loader
 train = train.tocoo()
-train_data = TrnData(original_train, device)
-train_loader = data.DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=24)
+train_data = TrnData(original_train)
+train_loader = data.DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=16)
 test = test.tocoo()
-test_data = TrnData(test, device)
-test_loader = data.DataLoader(test_data, batch_size=len(test_data), shuffle=False, num_workers=24)
+test_data = TrnData(test)
+test_loader = data.DataLoader(test_data, batch_size=len(test_data), shuffle=False, num_workers=16)
 val = val.tocoo()
-val_data = TrnData(val, device)
-val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, num_workers=24)
-
+val_data = TrnData(val)
+val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, num_workers=16)
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
 print('Adj matrix normalized.')
@@ -104,6 +103,9 @@ for epoch in range(epoch_no):
     epoch_loss_s = 0
     for i, batch in enumerate(tqdm(train_loader)): ## batch
         uids, iids, sign = batch
+        uids = uids.to(device)
+        iids = iids.to(device)
+        sign = sign.to(device)
         #feed
         optimizer.zero_grad()
         loss, loss_r, loss_s= model(uids, iids, sign, test=False)
@@ -126,20 +128,26 @@ for epoch in range(epoch_no):
     if epoch % 3 == 0:  # test every 3 epochs
         val_auc, test_auc = None, None
         with torch.no_grad():
+            auc_metric.reset()
             for i, batch in enumerate(tqdm(test_loader)): ## Full batch
                 uids, iids, sign = batch
+                uids = uids.to(device)
+                iids = iids.to(device)
+                sign = sign.to(device)
                 pred = model(uids, iids, sign, test=True)
-                auc_metric.reset()
                 auc_metric.update(pred, sign.long())
-                test_auc = auc_metric.compute()
-                print(test_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy())) #double check
+            test_auc = auc_metric.compute()
+            print(test_auc)
+            auc_metric.reset()
             for i, batch in enumerate(tqdm(val_loader)): ## Full batch
                 uids, iids, sign = batch
+                uids = uids.to(device)
+                iids = iids.to(device)
+                sign = sign.to(device)
                 pred = model(uids, iids, sign, test=True)
-                auc_metric.reset()
                 auc_metric.update(pred, sign.long())
-                val_auc = auc_metric.compute()
-                print(val_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy())) #double check
+            val_auc = auc_metric.compute()
+            print(val_auc)
         best_val_auc = max(best_val_auc, val_auc)
         best_test_auc = max(best_test_auc, test_auc)
         print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        

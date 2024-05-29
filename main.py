@@ -65,7 +65,7 @@ val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, 
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
 print('Adj matrix normalized.')
-auc_metric = torchmetrics.AUROC(pos_label = 1)
+auc_metric = torchmetrics.AUROC(pos_label = 1, task = 'binary')
 
 # perform svd reconstruction
 adj = scipy_sparse_mat_to_torch_sparse_tensor(train).coalesce().cuda(torch.device(device))
@@ -123,8 +123,6 @@ for epoch in range(epoch_no):
     loss_list.append(epoch_loss)
     loss_r_list.append(epoch_loss_r)
     loss_s_list.append(epoch_loss_s)
-    print('Epoch:',epoch,'Loss:',epoch_loss,'Loss_r:',epoch_loss_r,'Loss_s:',epoch_loss_s)
-
     if epoch % 3 == 0:  # test every 3 epochs
         val_auc, test_auc = None, None
         with torch.no_grad():
@@ -149,6 +147,6 @@ for epoch in range(epoch_no):
         best_val_auc = max(best_val_auc, val_auc)
         if val_auc == best_val_auc:
             best_test_auc = test_auc
-        print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
+            print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
 
 print(f"Result : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")

@@ -55,13 +55,13 @@ for i in range(len(train.data)):
 # construct data loader
 train = train.tocoo()
 train_data = TrnData(original_train, device)
-train_loader = data.DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=0)
+train_loader = data.DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=24)
 test = test.tocoo()
 test_data = TrnData(test, device)
-test_loader = data.DataLoader(test_data, batch_size=len(test_data), shuffle=False, num_workers=0)
+test_loader = data.DataLoader(test_data, batch_size=len(test_data), shuffle=False, num_workers=24)
 val = val.tocoo()
 val_data = TrnData(val, device)
-val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, num_workers=0)
+val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, num_workers=24)
 
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
@@ -132,14 +132,14 @@ for epoch in range(epoch_no):
                 auc_metric.reset()
                 auc_metric.update(pred, sign.long())
                 test_auc = auc_metric.compute()
-                print(test_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy()))
+                print(test_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy())) #double check
             for i, batch in enumerate(tqdm(val_loader)): ## Full batch
                 uids, iids, sign = batch
                 pred = model(uids, iids, sign, test=True)
                 auc_metric.reset()
                 auc_metric.update(pred, sign.long())
                 val_auc = auc_metric.compute()
-                print(val_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy()))
+                print(val_auc, roc_auc_score(sign.to("cpu").detach().numpy(), pred.to("cpu").detach().numpy())) #double check
         best_val_auc = max(best_val_auc, val_auc)
         best_test_auc = max(best_test_auc, test_auc)
         print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        

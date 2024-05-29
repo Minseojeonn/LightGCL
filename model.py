@@ -49,7 +49,7 @@ class LightGCL(nn.Module):
             i_emb = self.E_i[iids]
             logit = self.sign_classifier(torch.concat([u_emb,i_emb], dim = -1))
             pred = self.sigmoid(logit).squeeze()
-            return (pred >= 0.5).float()
+            return pred
         else:  # training phase
             for layer in range(1,self.l+1):
                 # GNN propagation

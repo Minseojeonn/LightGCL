@@ -49,11 +49,6 @@ class LightGCL(nn.Module):
             i_emb = self.E_i[iids]
             logit = self.sign_classifier(torch.concat([u_emb,i_emb], dim = -1))
             pred = self.sigmoid(logit).squeeze()
-            #mask = self.train_csr[uids.cpu().numpy()].toarray()
-            #mask = torch.Tensor(mask).cuda(torch.device(self.device))
-            #preds = preds * (1-mask) - 1e8 * mask
-            #for ranking task
-            #predictions = preds.argsort(descending=True)
             return (pred >= 0.5).float()
         else:  # training phase
             for layer in range(1,self.l+1):

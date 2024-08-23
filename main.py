@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import pickle
 from model import LightGCL
-from utils import metrics, scipy_sparse_mat_to_torch_sparse_tensor
+from utils import metrics, scipy_sparse_mat_to_torch_sparse_tensor, load_data, set_random_seed, split_data, txt_to_adj_matrix, logging_with_mlflow, logging_with_mlflow_metric
 import pandas as pd
 from parser import args
 from tqdm import tqdm
@@ -29,29 +29,39 @@ dropout = args.dropout
 lr = args.lr
 decay = args.decay
 svd_q = args.q
+seed = args.seed
+use_mlflow = False
 
+# Set MLflow
+if use_mlflow:
+    remote_server_uri = "http://0.0.0.0:5001"
+    mlflow.set_tracking_uri(remote_server_uri)
+    experiment_name = f"lightgcl-{args.data}-{args.seed}"
+    mlflow.set_experiment(experiment_name)
+    mlflow.start_run()
+
+if use_mlflow:
+    logging_with_mlflow(args)
+    
 # load data
-path = 'data/' + args.data + '/'
-f = open(path+'trnMat.pkl','rb')
-train = pickle.load(f)
+set_random_seed(seed, device)
+path = 'data/' + args.data + '.tsv'
+##converted_load
+edgelist, num_nodes, num_edges = load_data(path, True, "bi")
+train_X, train_Y, val_X, val_Y, test_X, test_Y = split_data(edgelist, [0.85, 0.05, 0.1], seed, True)
+train = txt_to_adj_matrix(train_X, train_Y, num_nodes)
 train_csr = (train!=0).astype(np.float32)
 original_train = deepcopy(train)
 train = train_csr.tocoo()
-print("Nonzero 개수:", train.nnz, train_csr.nnz)
-f = open(path+'tstMat.pkl','rb')
-test = pickle.load(f)
-f = open(path+'valMat.pkl','rb')
-val = pickle.load(f)
-print('Data loaded.')
-print('user_num:',train.shape[0],'item_num:',train.shape[1],'lambda_1:',lambda_1,'lambda_2:',lambda_2,'temp:',temp,'q:',svd_q)
-epoch_user = min(train.shape[0], 30000)
+test = txt_to_adj_matrix(test_X, test_Y, num_nodes)
+val = txt_to_adj_matrix(val_X, val_Y, num_nodes)
 
 # normalizing the adj matrix
 rowD = np.array(train_csr.sum(1)).squeeze()
 colD = np.array(train_csr.sum(0)).squeeze()
 for i in range(len(train.data)):
     train.data[i] = train.data[i] / pow(rowD[train.row[i]]*colD[train.col[i]], 0.5)
-
+    
 # construct data loader
 train = train.tocoo()
 train_data = TrnData(original_train)
@@ -65,7 +75,7 @@ val_loader = data.DataLoader(val_data, batch_size=len(val_data), shuffle=False, 
 adj_norm = scipy_sparse_mat_to_torch_sparse_tensor(train)
 adj_norm = adj_norm.coalesce().cuda(torch.device(device))
 print('Adj matrix normalized.')
-auc_metric = torchmetrics.AUROC(pos_label = 1, task = 'binary')
+auc_metric = torchmetrics.AUROC(task = 'binary')
 
 # perform svd reconstruction
 adj = scipy_sparse_mat_to_torch_sparse_tensor(train).coalesce().cuda(torch.device(device))
@@ -150,3 +160,5 @@ for epoch in range(epoch_no):
             print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
 
 print(f"Result : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")
+
+logging_with_mlflow_metric('Best Val AUROC', best_val_auc)

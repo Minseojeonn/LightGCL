@@ -99,6 +99,7 @@ class LightGCL(nn.Module):
             i_emb = self.E_i[iids]
             logit = self.sign_classifier(torch.concat([u_emb,i_emb], dim = -1))
             logit = self.sigmoid(logit).squeeze()
+            prob = self.sigmoid(logit)
             loss_r = self.bceloss(logit,sign)
                 
             # reg loss

@@ -12,7 +12,8 @@ from utils import TrnData
 from copy import deepcopy
 import torchmetrics 
 from sklearn.metrics import roc_auc_score
-
+from utils import metric
+import mlflow
 
 device = 'cuda:' + args.cuda
 
@@ -30,7 +31,7 @@ lr = args.lr
 decay = args.decay
 svd_q = args.q
 seed = args.seed
-use_mlflow = False
+use_mlflow = True
 
 # Set MLflow
 if use_mlflow:
@@ -39,10 +40,8 @@ if use_mlflow:
     experiment_name = f"lightgcl-{args.data}-{args.seed}"
     mlflow.set_experiment(experiment_name)
     mlflow.start_run()
+    mlflow.log_params(vars(args))
 
-if use_mlflow:
-    logging_with_mlflow(args)
-    
 # load data
 set_random_seed(seed, device)
 path = 'data/' + args.data + '.tsv'
@@ -102,12 +101,8 @@ optimizer = torch.optim.Adam(model.parameters(),weight_decay=0,lr=lr)
 
 current_lr = lr
 
+step_results = []
 for epoch in range(epoch_no):
-    # 모델 저장
-    # if (epoch+1)%50 == 0:
-        ##torch.save(model.state_dict(),'saved_model/saved_model_epoch_'+str(epoch)+'.pt')
-        ##torch.save(optimizer.state_dict(),'saved_model/saved_optim_epoch_'+str(epoch)+'.pt')
-
     epoch_loss = 0
     epoch_loss_r = 0
     epoch_loss_s = 0
@@ -125,7 +120,6 @@ for epoch in range(epoch_no):
         epoch_loss_r += loss_r.cpu().item()
         epoch_loss_s += loss_s.cpu().item()
         
-
     batch_no = len(train_loader)
     epoch_loss = epoch_loss/batch_no
     epoch_loss_r = epoch_loss_r/batch_no
@@ -133,32 +127,36 @@ for epoch in range(epoch_no):
     loss_list.append(epoch_loss)
     loss_r_list.append(epoch_loss_r)
     loss_s_list.append(epoch_loss_s)
-    if epoch % 3 == 0:  # test every 3 epochs
-        val_auc, test_auc = None, None
-        with torch.no_grad():
-            auc_metric.reset()
-            for i, batch in enumerate(tqdm(test_loader)): ## Full batch
-                uids, iids, sign = batch
-                uids = uids.to(device)
-                iids = iids.to(device)
-                sign = sign.to(device)
-                pred = model(uids, iids, sign, test=True)
-                auc_metric.update(pred, sign.long())
-            test_auc = auc_metric.compute()
-            auc_metric.reset()
-            for i, batch in enumerate(tqdm(val_loader)): ## Full batch
-                uids, iids, sign = batch
-                uids = uids.to(device)
-                iids = iids.to(device)
-                sign = sign.to(device)
-                pred = model(uids, iids, sign, test=True)
-                auc_metric.update(pred, sign.long())
-            val_auc = auc_metric.compute()
-        best_val_auc = max(best_val_auc, val_auc)
-        if val_auc == best_val_auc:
-            best_test_auc = test_auc
-            print(f"ephoch{epoch} : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")        
+    
+        
+    with torch.no_grad():
+        test_probs = []
+        test_labels = []
+        val_probs = []
+        val_labels = []
+        for i, batch in enumerate(tqdm(test_loader)): ## Full batch
+            uids, iids, sign = batch
+            uids = uids.to(device)
+            iids = iids.to(device)
+            sign = sign.to(device)
+            prob = model(uids, iids, sign, test=True)
+            test_probs.append(prob)
+            test_labels.append(sign)    
+        for i, batch in enumerate(tqdm(val_loader)): ## Full batch
+            uids, iids, sign = batch
+            uids = uids.to(device)
+            iids = iids.to(device)
+            sign = sign.to(device)
+            prob = model(uids, iids, sign, test=True)
+            val_probs.append(prob)
+            val_labels.append(sign) 
+        test_probs = torch.cat(test_probs)
+        test_labels = torch.cat(test_labels)
+        val_probs = torch.cat(val_probs)
+        val_labels = torch.cat(val_labels)
+        val_metric = metric(val_labels, val_probs)
+        test_metric = metric(test_labels, test_probs)        
+        step_results.append({"val": val_metric, "test": test_metric})
 
-print(f"Result : Best Val AUROC : {best_val_auc}, Best Test AUROC : {best_test_auc}")
-
-logging_with_mlflow_metric('Best Val AUROC', best_val_auc)
+if use_mlflow:
+    logging_with_mlflow_metric(step_results)

@@ -3,8 +3,11 @@ import torch
 import torch.nn as nn
 import torch.utils.data as data
 import random
+from sklearn.metrics import f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from scipy.sparse import coo_matrix
+from tqdm import tqdm
+import mlflow
 
 def metrics(uids, predictions, topk, test_labels):
     user_num = 0
@@ -217,7 +220,7 @@ def logging_with_mlflow_metric(results):
     best_binary_epoch, best_binary_score = -1, -float("inf")
     best_micro_epoch, best_micro_score = -1, -float("inf")
     for idx in tqdm(range(len(results)), desc='mlflow_uploading'):
-        train_metric, val_metric, test_metric, train_loss = [
+        val_metric, test_metric = [
             value for key, value in results[idx].items()]
         val_auc, val_bi, val_mi, val_ma = [v for k, v in val_metric.items()]
     
@@ -235,10 +238,6 @@ def logging_with_mlflow_metric(results):
             best_macro_epoch = idx
     
         metrics_dict = {
-            "train_auc": train_metric["auc"],
-            "train_binary_f1": train_metric["f1-bi"],
-            "train_macro_f1": train_metric["f1-ma"],
-            "train_micro_f1": train_metric["f1-mi"],
             "val_auc": val_metric["auc"],
             "val_binary_f1": val_metric["f1-bi"],
             "val_macro_f1": val_metric["f1-ma"],
@@ -246,22 +245,35 @@ def logging_with_mlflow_metric(results):
             "test_auc": test_metric["auc"],
             "test_binary_f1": test_metric["f1-bi"],
             "test_macro_f1": test_metric["f1-ma"],
-            "test_micro_f1": test_metric["f1-mi"],
-            "loss_sum": train_loss["loss_sum"],
-            "sign_loss": train_loss["sign_loss"]
+            "test_micro_f1": test_metric["f1-mi"]
         }
-        if train_loss["model_loss"] != None:
-            metrics_dict["cl_loss"] = train_loss["model_loss"]
         mlflow.log_metrics(metrics_dict, synchronous=False, step=idx)
 
     best_metrics_dict = {
-        "best_auc_val": results[best_auc_epoch]["valid"]["auc"],
-        "best_bi_val": results[best_binary_epoch]["valid"]["f1-bi"],
-        "best_ma_val": results[best_macro_epoch]["valid"]["f1-ma"],
-        "best_mi_val": results[best_micro_epoch]["valid"]["f1-mi"],
+        "best_auc_val": results[best_auc_epoch]["val"]["auc"],
+        "best_bi_val": results[best_binary_epoch]["val"]["f1-bi"],
+        "best_ma_val": results[best_macro_epoch]["val"]["f1-ma"],
+        "best_mi_val": results[best_micro_epoch]["val"]["f1-mi"],
         "best_auc_test": results[best_auc_epoch]["test"]["auc"],
         "best_bi_test": results[best_binary_epoch]["test"]["f1-bi"],
         "best_ma_test": results[best_macro_epoch]["test"]["f1-ma"],
         "best_mi_test": results[best_micro_epoch]["test"]["f1-mi"]
     }
     mlflow.log_metrics(best_metrics_dict, synchronous=True)
+    
+def metric(truths, probs):
+    """calculate metric
+
+    Args:
+        truths (torch.tensor): label
+        preds (torch.tensor): preds
+
+    Returns:
+        pred_dict: {auroc, f1-bi, f1-mi, f1-ma}
+    """
+    truths = truths.squeeze().cpu().detach().numpy()
+    
+    preds = (probs >= 0.5).long().squeeze().cpu().detach().numpy()
+    probs = probs.squeeze().cpu().detach().numpy()
+
+    return {"auc": roc_auc_score(truths, probs), "f1-bi": f1_score(truths, preds, average='binary'), "f1-mi": f1_score(truths, preds, average='micro'), "f1-ma": f1_score(truths, preds, average='macro')}
